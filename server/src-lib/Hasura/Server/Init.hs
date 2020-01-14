@@ -91,6 +91,7 @@ data RawServeOptions impl
   , rsoEnabledLogTypes  :: !(Maybe [L.EngineLogType impl])
   , rsoLogLevel         :: !(Maybe L.LogLevel)
   , rsoPlanCacheSize    :: !(Maybe Cache.CacheSize)
+  , rsoRowFetchLimit    :: !(Maybe Int)
   }
 
 data ServeOptions impl
@@ -114,6 +115,7 @@ data ServeOptions impl
   , soEnabledLogTypes  :: !(Set.HashSet (L.EngineLogType impl))
   , soLogLevel         :: !L.LogLevel
   , soPlanCacheOptions :: !E.PlanCacheOptions
+  , soRowFetchLimit    :: !(Maybe Int)
   }
 
 data RawConnInfo =
@@ -331,10 +333,11 @@ mkServeOptions rso = do
                  withEnv (rsoEnabledLogTypes rso) (fst enabledLogsEnv)
   serverLogLevel <- fromMaybe L.LevelInfo <$> withEnv (rsoLogLevel rso) (fst logLevelEnv)
   planCacheOptions <- E.mkPlanCacheOptions <$> withEnv (rsoPlanCacheSize rso) (fst planCacheSizeEnv)
+  rowFetchLimit <- withEnv (rsoRowFetchLimit rso) (fst rowFetchLimitEnv)
   return $ ServeOptions port host connParams txIso adminScrt authHook jwtSecret
                         unAuthRole corsCfg enableConsole consoleAssetsDir
                         enableTelemetry strfyNum enabledAPIs lqOpts enableAL
-                        enabledLogs serverLogLevel planCacheOptions
+                        enabledLogs serverLogLevel planCacheOptions rowFetchLimit
   where
 #ifdef DeveloperAPIs
     defaultAPIs = [METADATA,GRAPHQL,PGDUMP,CONFIG,DEVELOPER]
@@ -465,7 +468,7 @@ serveCmdFooter =
       , adminSecretEnv , accessKeyEnv, authHookEnv, authHookModeEnv
       , jwtSecretEnv, unAuthRoleEnv, corsDomainEnv, enableConsoleEnv
       , enableTelemetryEnv, wsReadCookieEnv, stringifyNumEnv, enabledAPIsEnv
-      , enableAllowlistEnv, enabledLogsEnv, logLevelEnv
+      , enableAllowlistEnv, enabledLogsEnv, logLevelEnv, rowFetchLimitEnv
       ]
 
     eventEnvs =
@@ -628,6 +631,12 @@ logLevelEnv =
   , "Server log level (default: info) (all: error, warn, info, debug)"
   )
 
+rowFetchLimitEnv :: (String, String)
+rowFetchLimitEnv =
+  ( "HASURA_ROW_FETCH_LIMIT"
+  , "The global row fetch limit, limits the amount of rows returned on select if no table specific permissions is specified."
+  )
+
 parseRawConnInfo :: Parser RawConnInfo
 parseRawConnInfo =
   RawConnInfo <$> host <*> port <*> user <*> password
@@ -768,6 +777,14 @@ parseAdminSecret =
                 metavar "ADMIN SECRET KEY" <>
                 help (snd adminSecretEnv)
               )
+
+parseRowFetchLimit :: Parser (Maybe Int)
+parseRowFetchLimit = optional $
+  option auto
+       ( long "row-fetch-limit" <>
+         metavar "ROW FETCH LIMIT" <>
+         help (snd rowFetchLimitEnv)
+       )
 
 readHookType :: String -> Either String AuthHookType
 readHookType tyS =
@@ -1021,6 +1038,7 @@ serveOptsToLog so =
       , "enabled_log_types" J..= soEnabledLogTypes so
       , "log_level" J..= soLogLevel so
       , "plan_cache_options" J..= soPlanCacheOptions so
+      , "row_fetch_limit" J..= soRowFetchLimit so
       ]
 
 mkGenericStrLog :: L.LogLevel -> T.Text -> String -> StartupLog
@@ -1061,3 +1079,4 @@ serveOptionsParser =
   <*> parseEnabledLogs
   <*> parseLogLevel
   <*> parsePlanCacheSize
+  <*> parseRowFetchLimit
